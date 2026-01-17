@@ -74,7 +74,7 @@ KillRewarder::KillRewarder(Player* killer, Unit* victim, bool isBattleGround) :
         _isFullXP(false), _maxLevel(0), _isBattleGround(isBattleGround), _isPvP(false)
 {
     // mark the credit as pvp if victim is player
-    if (victim->GetTypeId() == TYPEID_PLAYER)
+    if (victim->IsPlayer())
         _isPvP = true;
     //npcbot
     else if (victim->IsNPCBotOrPet())
@@ -119,6 +119,35 @@ void KillRewarder::_InitGroupData()
                     // 2.5. _sumLevel - sum of levels of group members within reward distance;
                     _sumLevel += lvl;
                 }
+
+        //npcbot
+        if (BotMgr::GetNpcBotXpReductionBlizzlikeEnabled())
+        {
+            for (GroupReference* itr = _group->GetFirstMember(); itr != nullptr; itr = itr->next())
+            {
+                Player* member = itr->GetSource();
+                if (!member || !member->IsInMap(_victim) || !member->HaveBot())
+                    continue;
+
+                BotMap const* botMap = member->GetBotMgr()->GetBotMap();
+                for (auto const& kv : *botMap)
+                {
+                    Creature const* bot = kv.second;
+                    if (bot && bot->IsAlive() && bot->IsInMap(_victim) && (_group->IsMember(kv.first) || !BotMgr::GetNpcBotXpReductionBlizzlikeGroupOnly()) &&
+                        (member->GetMap()->IsDungeon() || _victim->GetDistance(bot) <= sWorld->getFloatConfig(CONFIG_GROUP_XP_DISTANCE)))
+                    {
+                        const uint8 lvl = bot->GetLevel();
+                        ++_count;
+                        _sumLevel += lvl;
+                        _aliveSumLevel += lvl;
+                        if (_maxLevel < lvl)
+                            _maxLevel = lvl;
+                    }
+                }
+            }
+        }
+        //end npcbot
+
         // 2.6. _isFullXP - flag identifying that for all group members victim is not gray,
         //      so 100% XP will be rewarded (50% otherwise).
         _isFullXP = _maxNotGrayMember && (_maxLevel == _maxNotGrayMember->GetLevel());
@@ -138,7 +167,7 @@ void KillRewarder::_InitXP(Player* player)
         _xp = Acore::XP::Gain(player, _victim, _isBattleGround);
 
     if (_xp && !_isBattleGround && _victim) // pussywizard: npcs with relatively low hp give lower exp
-        if (_victim->GetTypeId() == TYPEID_UNIT)
+        if (_victim->IsCreature())
             if (const CreatureTemplate* ct = _victim->ToCreature()->GetCreatureTemplate())
                 if (ct->ModHealth <= 0.75f && ct->ModHealth >= 0.0f)
                     _xp = uint32(_xp * ct->ModHealth);
@@ -230,7 +259,7 @@ void KillRewarder::_RewardPlayer(Player* player, bool isDungeon)
         // 4.1. Give honor (player must be alive and not on BG).
         _RewardHonor(player);
         // 4.1.1 Send player killcredit for quests with PlayerSlain
-        if (_victim->GetTypeId() == TYPEID_PLAYER)
+        if (_victim->IsPlayer())
             player->KilledPlayerCredit();
     }
 
@@ -285,7 +314,7 @@ void KillRewarder::_RewardGroup()
                     {
                         _RewardPlayer(member, isDungeon);
                         // Xinef: only count players
-                        //if (_victim->GetTypeId() == TYPEID_PLAYER)
+                        //if (_victim->IsPlayer())
                         //    member->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_SPECIAL_PVP_KILL, 1, 0, _victim);
                     }
                 }

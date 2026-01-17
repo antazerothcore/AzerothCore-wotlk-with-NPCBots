@@ -5,6 +5,7 @@
 #include "botspell.h"
 #include "bottext.h"
 #include "botmgr.h"
+#include "Chat.h"
 #include "Creature.h"
 #include "Log.h"
 #include "Player.h"
@@ -80,6 +81,17 @@ public:
                     {
                         WhisperTo(player, me, bot_ai::LocalizedNpcText(player, BOT_TEXT_BOTGIVER_TOO_MANY_BOTS).c_str());
                         break;
+                    }
+
+                    if (uint32 maxBotsPerAccount = BotMgr::GetMaxAccountBots())
+                    {
+                        uint32 accountBotsCount = BotDataMgr::GetAccountBotsCount(player->GetSession()->GetAccountId());
+                        if (accountBotsCount >= maxBotsPerAccount)
+                        {
+                            ChatHandler ch(player->GetSession());
+                            ch.PSendSysMessage(bot_ai::LocalizedNpcText(player, BOT_TEXT_HIREFAIL_MAXBOTS_ACCOUNT).c_str(), accountBotsCount, maxBotsPerAccount);
+                            break;
+                        }
                     }
 
                     subMenu = true;
@@ -167,7 +179,7 @@ public:
 
                     uint8 botclass = action - GOSSIP_ACTION_INFO_DEF;
 
-                    uint32 cost = BotMgr::GetNpcBotCost(player->GetLevel(), botclass);
+                    uint32 cost = BotMgr::GetNpcBotCostHire(player->GetLevel(), botclass);
                     if (!player->HasEnoughMoney(cost))
                     {
                         WhisperTo(player, me, bot_ai::LocalizedNpcText(player, BOT_TEXT_HIREFAIL_COST).c_str());
@@ -236,7 +248,7 @@ public:
                     if (!bot)
                     {
                         //possible but still
-                        LOG_ERROR("entities.unit", "HIRE_NBOT_ENTRY: bot {} not found!", entry);
+                        BOT_LOG_ERROR("entities.unit", "HIRE_NBOT_ENTRY: bot {} not found!", entry);
                         break;
                     }
 
@@ -244,7 +256,7 @@ public:
                     if (bot->IsInCombat() || !bot->IsAlive() || bot_ai::CCed(bot) ||
                         bot->HasUnitState(UNIT_STATE_CASTING) || ai->GetBotOwnerGuid() || bot->HasAura(BERSERK))
                     {
-                        //TC_LOG_ERROR("entities.unit", "HIRE_NBOT_ENTRY: bot %u (%s) is unavailable all of the sudden!", entry);
+                        //BOT_LOG_ERROR("entities.unit", "HIRE_NBOT_ENTRY: bot %u (%s) is unavailable all of the sudden!", entry);
                         std::ostringstream failMsg;
                         failMsg << bot->GetName() << bot_ai::LocalizedNpcText(player, BOT_TEXT_BOTGIVER__BOT_BUSY);
                         WhisperTo(player, me, failMsg.str().c_str());

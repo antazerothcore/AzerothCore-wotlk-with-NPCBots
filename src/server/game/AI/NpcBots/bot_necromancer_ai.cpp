@@ -51,7 +51,7 @@ enum NecromancerSpecial
     //get 80% mana back if casting on a skeleton
     UNHOLY_FRENZY_REFUND    = UNHOLY_FRENZY_COST / 10 * 8,
 
-    MAX_MINIONS             = 6,
+    MAX_MINIONS             = 12,
 
     SPELL_SPAWN_ANIM        = 25035,
     SPELL_BLOODY_EXPLOSION  = 36599,
@@ -143,7 +143,7 @@ public:
         void KilledUnit(Unit* u) override { bot_ai::KilledUnit(u); }
         void EnterEvadeMode(EvadeReason why = EVADE_REASON_OTHER) override { bot_ai::EnterEvadeMode(why); }
         void MoveInLineOfSight(Unit* u) override { bot_ai::MoveInLineOfSight(u); }
-        void JustDied(Unit* u) override { UnsummonAll(); bot_ai::JustDied(u); }
+        void JustDied(Unit* u) override { UnsummonAll(false); bot_ai::JustDied(u); }
         void DoNonCombatActions(uint32 /*diff*/) { }
 
         void CheckCorpseExplosion(uint32 diff)
@@ -171,7 +171,7 @@ public:
                     return false;
                 };
                 Creature* creature = nullptr;
-                Acore::CreatureLastSearcher searcher(me, creature, corpse_pred);
+                Bcore::CreatureLastSearcher searcher(me, creature, corpse_pred);
                 Cell::VisitAllObjects(me, searcher, ceinfo->RangeEntry->RangeMax[0]);
 
                 if (creature)
@@ -191,7 +191,7 @@ public:
                     {
                         std::list<Unit*> units;
                         NearbyHostileUnitCheck check(me, ceradius, this, 0, c);
-                        Acore::UnitListSearcher searcher(c, units, check);
+                        Bcore::UnitListSearcher searcher(c, units, check);
                         Cell::VisitAllObjects(c, searcher, ceradius);
                         if (units.size() > maxmob)
                         {
@@ -203,11 +203,11 @@ public:
                     return false;
                 };
                 std::list<Creature*> corpses;
-                Acore::CreatureListSearcher searcher(me, corpses, corpse_pred);
+                Bcore::CreatureListSearcher searcher(me, corpses, corpse_pred);
                 Cell::VisitAllObjects(me, searcher, ceinfo->RangeEntry->RangeMax[0]);
 
                 if (Creature* corpse = corpses.empty() ? nullptr : corpses.size() == 1 ? corpses.front() :
-                    Acore::Containers::SelectRandomContainerElement(corpses))
+                    Bcore::Containers::SelectRandomContainerElement(corpses))
                 {
                     if (doCast(corpse, GetSpell(CORPSE_EXPLOSION_1)))
                     {
@@ -235,7 +235,7 @@ public:
                 return false;
             };
             Creature* creature = nullptr;
-            Acore::CreatureLastSearcher searcher(me, creature, corpse_pred);
+            Bcore::CreatureLastSearcher searcher(me, creature, corpse_pred);
             Cell::VisitAllObjects(me, searcher, 25.f);
 
             if (creature)
@@ -304,7 +304,7 @@ public:
                     }
                 }
                 if (!targets.empty())
-                    target = targets.size() == 1u ? *targets.begin() : Acore::Containers::SelectRandomContainerElement(targets);
+                    target = targets.size() == 1u ? *targets.begin() : Bcore::Containers::SelectRandomContainerElement(targets);
             }
 
             if (target && doCast(target, GetSpell(UNHOLY_FRENZY_1)))
@@ -515,7 +515,7 @@ public:
 
                 if (baseId == UNHOLY_FRENZY_1)
                 {
-                    if (target->GetEntry() == BOT_PET_NECROSKELETON && _minions.find(target) != _minions.end())
+                    if (target->GetEntry() == BOT_PET_NECROSKELETON && _minions.find(target->ToCreature()) != _minions.end())
                     {
                         //get 80% mana back if casting on a skeleton
                         me->EnergizeBySpell(me, UNHOLY_FRENZY_1, UNHOLY_FRENZY_REFUND, POWER_MANA);
@@ -596,10 +596,10 @@ public:
                         u = *itr;
                     }
                 }
-                //try 2: by minimal duration
+                //try 2: by minimal duration (if expiring already)
                 if (!u)
                 {
-                    uint32 minduration = 0;
+                    uint32 minduration = static_cast<uint32>((*_minions.begin())->GetAI()->GetData(BOTPETAI_MISC_DURATION_MAX) * 3 / 4);
                     for (Summons::const_iterator itr = _minions.begin(); itr != _minions.end(); ++itr)
                     {
                         if ((*itr)->GetAI()->GetData(BOTPETAI_MISC_DURATION) > minduration)
@@ -609,9 +609,9 @@ public:
                         }
                     }
                 }
-                //try 3: last resort
+
                 if (!u)
-                    u = *(_minions.begin());
+                    return;
 
                 u->ToTempSummon()->UnSummon();
             }
@@ -651,10 +651,9 @@ public:
             _minions.insert(myPet);
         }
 
-        void UnsummonAll() override
+        void UnsummonAll(bool savePets = true) override
         {
-            while (!_minions.empty())
-                (*_minions.begin())->ToTempSummon()->UnSummon();
+            UnsummonCreatures(_minions, savePets);
         }
 
         void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) override
@@ -693,7 +692,7 @@ public:
             _corpseExplosionCheckTimer = 0;
             _raiseDeadCheckTimer = 0;
 
-            UnsummonAll();
+            UnsummonAll(false);
 
             DefaultInit();
         }
@@ -757,7 +756,7 @@ public:
             static const uint32 ViableCreatureTypesMask =
                 (1 << (CREATURE_TYPE_BEAST-1)) | (1 << (CREATURE_TYPE_DRAGONKIN-1)) | (1 << (CREATURE_TYPE_HUMANOID-1));
 
-            return !c->IsAlive() && c->GetDisplayId() == c->GetNativeDisplayId() &&
+            return c->getDeathState() == DeathState::Corpse && c->GetDisplayId() == c->GetNativeDisplayId() &&
                 !c->IsVehicle() && !c->isWorldBoss() && !c->IsDungeonBoss() &&
                 ((1 << (c->GetCreatureType()-1)) & ViableCreatureTypesMask) &&
                 !c->IsControlledByPlayer() && !c->IsNPCBot() && c->GetMaxHealth() >= me->GetMaxHealth() / 4;
@@ -766,7 +765,7 @@ public:
         uint32 _corpseExplosionCheckTimer;
         uint32 _raiseDeadCheckTimer;
 
-        typedef std::set<Unit*> Summons;
+        typedef std::set<Creature*> Summons;
         Summons _minions;
     };
 };

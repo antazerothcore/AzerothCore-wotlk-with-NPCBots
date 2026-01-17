@@ -29,6 +29,10 @@
 #include "WorldSession.h"
 #include "icecrown_citadel.h"
 
+//npcbot
+#include "bot_InstanceEvents.h"
+//end npcbot
+
 enum EventIds
 {
     EVENT_PLAYERS_GUNSHIP_SPAWN     = 22663,
@@ -123,8 +127,10 @@ DoorData const doorData[] =
 
 ObjectData const creatureData[] =
 {
-    { NPC_SINDRAGOSA, DATA_SINDRAGOSA },
-    { 0,              0               }
+    { NPC_SINDRAGOSA,     DATA_SINDRAGOSA     },
+    { NPC_THE_SKYBREAKER, DATA_THE_SKYBREAKER },
+    { NPC_ORGRIMS_HAMMER, DATA_ORGRIMS_HAMMER },
+    { 0,                  0                   }
 };
 
 // this doesnt have to only store questgivers, also can be used for related quest spawns
@@ -260,7 +266,20 @@ public:
         void OnPlayerEnter(Player* player) override
         {
             if (TeamIdInInstance == TEAM_NEUTRAL)
-                TeamIdInInstance = player->GetTeamId();
+            {
+                if (Group* group = player->GetGroup())
+                {
+                    if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                        TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                    else
+                        TeamIdInInstance = player->GetTeamId();
+                }
+                else
+                    TeamIdInInstance = player->GetTeamId();
+            }
+
+            if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
+                player->SetFaction((TeamIdInInstance == TEAM_HORDE) ? 1610 : 1);
 
             // for professor putricide hc
             DoRemoveAurasDueToSpellOnPlayers(SPELL_GAS_VARIABLE);
@@ -291,6 +310,12 @@ public:
             }
         }
 
+        void OnPlayerLeave(Player* player) override
+        {
+            if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
+                player->SetFactionForRace(player->getRace());
+        }
+
         void OnCreatureCreate(Creature* creature) override
         {
             if (TeamIdInInstance == TEAM_NEUTRAL)
@@ -298,7 +323,17 @@ public:
                 Map::PlayerList const& players = instance->GetPlayers();
                 if (!players.IsEmpty())
                     if (Player* player = players.begin()->GetSource())
-                        TeamIdInInstance = player->GetTeamId();
+                    {
+                        if (Group* group = player->GetGroup())
+                        {
+                            if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                                TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                            else
+                                TeamIdInInstance = player->GetTeamId();
+                        }
+                        else
+                            TeamIdInInstance = player->GetTeamId();
+                    }
             }
 
             // apply ICC buff to pets/summons
@@ -399,7 +434,7 @@ public:
                 case NPC_SE_HIGH_OVERLORD_SAURFANG:
                     if (TeamIdInInstance == TEAM_ALLIANCE)
                     {
-                        creature->UpdateEntry(NPC_SE_MURADIN_BRONZEBEARD, creature->GetCreatureData());
+                        creature->UpdateEntry(NPC_SE_MURADIN_BRONZEBEARD, true);
                         creature->LoadEquipment();
                     }
                     DeathbringerSaurfangEventGUID = creature->GetGUID();
@@ -535,6 +570,7 @@ public:
             }
 
             InstanceScript::OnCreatureCreate(creature);
+
         }
 
         void OnCreatureRemove(Creature* creature) override
@@ -552,7 +588,17 @@ public:
                 Map::PlayerList const& players = instance->GetPlayers();
                 if (!players.IsEmpty())
                     if (Player* player = players.begin()->GetSource())
-                        TeamIdInInstance = player->GetTeamId();
+                    {
+                        if (Group* group = player->GetGroup())
+                        {
+                            if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                                TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                            else
+                                TeamIdInInstance = player->GetTeamId();
+                        }
+                        else
+                            TeamIdInInstance = player->GetTeamId();
+                    }
             }
 
             uint32 entry = data->id1;
@@ -597,7 +643,17 @@ public:
                 Map::PlayerList const& players = instance->GetPlayers();
                 if (!players.IsEmpty())
                     if (Player* player = players.begin()->GetSource())
-                        TeamIdInInstance = player->GetTeamId();
+                    {
+                        if (Group* group = player->GetGroup())
+                        {
+                            if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                                TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                            else
+                                TeamIdInInstance = player->GetTeamId();
+                        }
+                        else
+                            TeamIdInInstance = player->GetTeamId();
+                    }
             }
 
             switch (entry)
@@ -701,7 +757,17 @@ public:
                 Map::PlayerList const& players = instance->GetPlayers();
                 if (!players.IsEmpty())
                     if (Player* player = players.begin()->GetSource())
-                        TeamIdInInstance = player->GetTeamId();
+                    {
+                        if (Group* group = player->GetGroup())
+                        {
+                            if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                                TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                            else
+                                TeamIdInInstance = player->GetTeamId();
+                        }
+                        else
+                            TeamIdInInstance = player->GetTeamId();
+                    }
             }
 
             switch (go->GetEntry())
@@ -1757,6 +1823,11 @@ public:
                         }
                     case EVENT_QUAKE_SHATTER:
                         {
+                            //npcbot
+                            if (GameObject const* platform = instance->GetGameObject(ArthasPlatformGUID))
+                                FrozenThronePlatformDestructionEvent(this, platform->GetPosition())();
+                            //end npcbot
+
                             if (GameObject* platform = instance->GetGameObject(ArthasPlatformGUID))
                                 platform->SetDestructibleState(GO_DESTRUCTIBLE_DAMAGED);
                             if (GameObject* edge = instance->GetGameObject(FrozenThroneEdgeGUID))
@@ -1877,6 +1948,9 @@ public:
                 case EVENT_FESTERGUT_VALVE_USED:
                     if (!(PutricideEventProgress & PUTRICIDE_EVENT_FLAG_FESTERGUT_VALVE))
                     {
+                        if (GameObject* goGas = instance->GetGameObject(GasReleaseValveGUID))
+                            goGas->SetGameObjectFlag(GO_FLAG_INTERACT_COND | GO_FLAG_NOT_SELECTABLE);
+
                         PutricideEventProgress |= PUTRICIDE_EVENT_FLAG_FESTERGUT_VALVE;
                         if (PutricideEventProgress & PUTRICIDE_EVENT_FLAG_ROTFACE_VALVE)
                         {
@@ -1894,6 +1968,9 @@ public:
                 case EVENT_ROTFACE_VALVE_USED:
                     if (!(PutricideEventProgress & PUTRICIDE_EVENT_FLAG_ROTFACE_VALVE))
                     {
+                        if (GameObject* goOoze = instance->GetGameObject(OozeReleaseValveGUID))
+                            goOoze->SetGameObjectFlag(GO_FLAG_INTERACT_COND | GO_FLAG_NOT_SELECTABLE);
+
                         PutricideEventProgress |= PUTRICIDE_EVENT_FLAG_ROTFACE_VALVE;
                         if (PutricideEventProgress & PUTRICIDE_EVENT_FLAG_FESTERGUT_VALVE)
                         {

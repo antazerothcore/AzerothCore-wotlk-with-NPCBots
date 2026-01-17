@@ -17,6 +17,7 @@
 
 #include "LFGMgr.h"
 #include "BattlegroundMgr.h"
+#include "Chat.h"
 #include "CharacterCache.h"
 #include "Common.h"
 #include "DBCStores.h"
@@ -29,7 +30,6 @@
 #include "LFGGroupData.h"
 #include "LFGPlayerData.h"
 #include "LFGQueue.h"
-#include "LFGScripts.h"
 #include "Language.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
@@ -672,8 +672,7 @@ namespace lfg
 
                                     if (plrg->GetGUID() != grp->GetLeaderGUID())
                                         if (Player* leader = ObjectAccessor::FindPlayer(grp->GetLeaderGUID()))
-                                            (ChatHandler(leader->GetSession())).PSendSysMessage("There is a npcbot in your group (owner: %s). Using npcbots in Dungeon Finder is restricted. Contact your administration.",
-                                                plrg->GetName().c_str());
+                                            (ChatHandler(leader->GetSession())).PSendSysMessage("There is a npcbot in your group (owner: {}). Using npcbots in Dungeon Finder is restricted. Contact your administration.", plrg->GetName());
 
                                     joinData.result = LFG_JOIN_PARTY_NOT_MEET_REQS;
                                     break;
@@ -684,7 +683,7 @@ namespace lfg
                                     //if (!(bot->GetBotRoles() & ( 1 | 2 | 4 ))) //(BOT_ROLE_TANK | BOT_ROLE_DPS | BOT_ROLE_HEAL)
                                     //{
                                     //    //no valid roles - reqs are not met
-                                    //    (ChatHandler(plrg->GetSession())).PSendSysMessage("Your bot %s does not have any viable roles assigned.", bot->GetName().c_str());
+                                    //    (ChatHandler(plrg->GetSession())).PSendSysMessage("Your bot {} does not have any viable roles assigned.", bot->GetName());
                                     //    joinData.result = LFG_JOIN_PARTY_NOT_MEET_REQS;
                                     //    continue;
                                     //}
@@ -902,7 +901,7 @@ namespace lfg
     void LFGMgr::ToggleTesting()
     {
         m_Testing = !m_Testing;
-        sWorld->SendWorldText(m_Testing ? LANG_DEBUG_LFG_ON : LANG_DEBUG_LFG_OFF);
+        ChatHandler(nullptr).SendWorldText(m_Testing ? LANG_DEBUG_LFG_ON : LANG_DEBUG_LFG_OFF);
     }
 
     /**
@@ -1788,21 +1787,6 @@ namespace lfg
 
                     player->GetBotMgr()->AddBotToGroup(bot);
                     grp->SetLfgRoles(bguid, proposal.players.find(bguid)->second.role);
-                }
-
-                if (grp->GetMembersCount() >= 5)
-                {
-                    uint8 pcount = 0;
-                    for (GroupReference const* gitr = grp->GetFirstMember(); gitr != nullptr; gitr = gitr->next())
-                        if (gitr->GetSource())
-                            ++pcount;
-                    if (pcount <= 1)
-                    {
-                        //only one player in group
-                        ChatHandler ch(player->GetSession());
-                        ch.SendSysMessage("You are the only player in your group, loot method set to Free For All");
-                        grp->SetLootMethod(FREE_FOR_ALL);
-                    }
                 }
 
                 continue;
