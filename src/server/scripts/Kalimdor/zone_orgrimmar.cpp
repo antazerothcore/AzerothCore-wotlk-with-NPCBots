@@ -91,7 +91,7 @@ public:
                 {
                     if (Player* player = ObjectAccessor::GetPlayer(*me, PlayerGUID))
                     {
-                        if (player->GetTypeId() == TYPEID_PLAYER && player->GetQuestStatus(QUEST_SHATTERED_SALUTE) == QUEST_STATUS_INCOMPLETE)
+                        if (player->IsPlayer() && player->GetQuestStatus(QUEST_SHATTERED_SALUTE) == QUEST_STATUS_INCOMPLETE)
                             player->FailQuest(QUEST_SHATTERED_SALUTE);
                     }
                     Reset();
@@ -152,6 +152,8 @@ enum ThrallWarchief : uint32
     AREA_RAZOR_HILL                = 362,
     AREA_CAMP_TAURAJO              = 378,
     AREA_CROSSROADS                = 380,
+
+    GO_UNADORNED_SPIKE             = 175787,
 
     // What the Wind Carries (ID: 6566)
     QUEST_WHAT_THE_WIND_CARRIES     = 6566,
@@ -247,7 +249,13 @@ public:
                 me->GetMap()->LoadGrid(heraldOfThrallPos.GetPositionX(), heraldOfThrallPos.GetPositionY());
                 me->SummonCreature(NPC_HERALD_OF_THRALL, heraldOfThrallPos, TEMPSUMMON_TIMED_DESPAWN, 20 * IN_MILLISECONDS);
                 me->HandleEmoteCommand(EMOTE_ONESHOT_ROAR);
-                scheduler.Schedule(2s, [this](TaskContext /*context*/)
+                scheduler.Schedule(1s, [this](TaskContext /*context*/)
+                {
+                    if (GameObject* spike = me->FindNearestGameObject(GO_UNADORNED_SPIKE, 10.0f))
+                    {
+                        spike->SetGoState(GO_STATE_ACTIVE);
+                    }
+                }).Schedule(2s, [this](TaskContext /*context*/)
                 {
                     Talk(SAY_THRALL_ON_QUEST_REWARD_0);
                 }).Schedule(9s, [this](TaskContext /*context*/)

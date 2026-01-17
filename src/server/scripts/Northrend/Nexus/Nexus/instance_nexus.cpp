@@ -19,6 +19,8 @@
 #include "InstanceMapScript.h"
 #include "ScriptedCreature.h"
 #include "nexus.h"
+#include "Player.h"
+#include "Group.h"
 
 DoorData const doorData[] =
 {
@@ -47,15 +49,29 @@ public:
             SetHeaders(DataHeader);
             SetBossNumber(MAX_ENCOUNTERS);
             LoadDoorData(doorData);
+
+            TeamIdInInstance = TEAM_NEUTRAL;
         }
 
         void OnCreatureCreate(Creature* creature) override
         {
-            Map::PlayerList const& players = instance->GetPlayers();
-            TeamId TeamIdInInstance = TEAM_NEUTRAL;
-            if (!players.IsEmpty())
-                if (Player* pPlayer = players.begin()->GetSource())
-                    TeamIdInInstance = pPlayer->GetTeamId();
+            if (TeamIdInInstance == TEAM_NEUTRAL)
+            {
+                Map::PlayerList const& players = instance->GetPlayers();
+                if (!players.IsEmpty())
+                    if (Player* pPlayer = players.begin()->GetSource())
+                    {
+                        if (Group* group = pPlayer->GetGroup())
+                        {
+                            if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                                TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                            else
+                                TeamIdInInstance = pPlayer->GetTeamId();
+                        }
+                        else
+                            TeamIdInInstance = pPlayer->GetTeamId();
+                    }
+            }
 
             switch (creature->GetEntry())
             {
@@ -85,6 +101,31 @@ public:
                         creature->UpdateEntry(NPC_COMMANDER_KOLURG);
                     break;
             }
+        }
+
+        void OnPlayerEnter(Player* player) override
+        {
+            if (TeamIdInInstance == TEAM_NEUTRAL)
+            {
+                if (Group* group = player->GetGroup())
+                {
+                    if (Player* gLeader = ObjectAccessor::FindPlayer(group->GetLeaderGUID()))
+                        TeamIdInInstance = Player::TeamIdForRace(gLeader->getRace());
+                    else
+                        TeamIdInInstance = player->GetTeamId();
+                }
+                else
+                    TeamIdInInstance = player->GetTeamId();
+            }
+
+            if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
+                player->SetFaction((TeamIdInInstance == TEAM_HORDE) ? 1610 : 1);
+        }
+
+        void OnPlayerLeave(Player* player) override
+        {
+            if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
+                player->SetFactionForRace(player->getRace());
         }
 
         void OnGameObjectCreate(GameObject* gameObject) override
@@ -153,6 +194,8 @@ public:
                 (*i)->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
             return true;
         }
+    protected:
+        TeamId TeamIdInInstance;
     };
 };
 
@@ -165,111 +208,97 @@ enum eFrayer
     SPELL_ENSNARE                       = 48053
 };
 
-class npc_crystalline_frayer : public CreatureScript
+struct npc_crystalline_frayer : public ScriptedAI
 {
-public:
-    npc_crystalline_frayer() : CreatureScript("npc_crystalline_frayer") { }
+    npc_crystalline_frayer(Creature* creature) : ScriptedAI(creature) { }
 
-    CreatureAI* GetAI(Creature* creature) const override
+    bool _allowDeath;
+    uint32 restoreTimer;
+    uint32 abilityTimer1;
+    uint32 abilityTimer2;
+
+    void Reset() override
     {
-        return GetNexusAI<npc_crystalline_frayerAI>(creature);
+        restoreTimer = 0;
+        abilityTimer1 = 0;
+        abilityTimer2 = 30000;
+        me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+        me->RemoveUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
     }
 
-    struct npc_crystalline_frayerAI : public ScriptedAI
+    void JustEngagedWith(Unit*) override
     {
-        npc_crystalline_frayerAI(Creature* creature) : ScriptedAI(creature)
+        _allowDeath = me->GetInstanceScript()->GetBossState(DATA_ORMOROK_EVENT) == DONE;
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        if (me->isRegeneratingHealth())
+            ScriptedAI::EnterEvadeMode(why);
+    }
+
+    void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
+    {
+        if (damage >= me->GetHealth())
         {
+            if (!_allowDeath)
+            {
+                me->RemoveAllAuras();
+                me->GetThreatMgr().ClearAllThreat();
+                me->CombatStop(true);
+                damage = 0;
+
+                me->SetReactState(REACT_PASSIVE);
+                me->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
+                me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+                me->SetRegeneratingHealth(false);
+                me->CastSpell(me, SPELL_SUMMON_SEED_POD, true);
+                me->CastSpell(me, SPELL_SEED_POD, true);
+                me->CastSpell(me, SPELL_AURA_OF_REGENERATION, false);
+                restoreTimer = 1;
+            }
+        }
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (restoreTimer)
+        {
+            restoreTimer += diff;
+            if (restoreTimer >= 90 * IN_MILLISECONDS)
+            {
+                Talk(0);
+                me->SetRegeneratingHealth(true);
+                restoreTimer = 0;
+                me->SetReactState(REACT_AGGRESSIVE);
+                me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+                me->RemoveUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
+            }
+            return;
         }
 
-        bool _allowDeath;
-        uint32 restoreTimer;
-        uint32 abilityTimer1;
-        uint32 abilityTimer2;
+        if (!UpdateVictim())
+            return;
 
-        void Reset() override
+        abilityTimer1 += diff;
+        abilityTimer2 += diff;
+
+        if (abilityTimer1 >= 5000)
         {
-            restoreTimer = 0;
+            me->CastSpell(me->GetVictim(), SPELL_ENSNARE, false);
             abilityTimer1 = 0;
-            abilityTimer2 = 30000;
-            me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-            me->RemoveUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
         }
 
-        void JustEngagedWith(Unit*) override
+        if (abilityTimer2 >= 30000)
         {
-            _allowDeath = me->GetInstanceScript()->GetBossState(DATA_ORMOROK_EVENT) == DONE;
+            me->CastSpell(me->GetVictim(), SPELL_CRYSTAL_BLOOM, false);
+            abilityTimer2 = 0;
         }
-
-        void EnterEvadeMode(EvadeReason why) override
-        {
-            if (me->isRegeneratingHealth())
-                ScriptedAI::EnterEvadeMode(why);
-        }
-
-        void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
-        {
-            if (damage >= me->GetHealth())
-            {
-                if (!_allowDeath)
-                {
-                    me->RemoveAllAuras();
-                    me->GetThreatMgr().ClearAllThreat();
-                    me->CombatStop(true);
-                    damage = 0;
-
-                    me->SetReactState(REACT_PASSIVE);
-                    me->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-                    me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                    me->SetRegeneratingHealth(false);
-                    me->CastSpell(me, SPELL_SUMMON_SEED_POD, true);
-                    me->CastSpell(me, SPELL_SEED_POD, true);
-                    me->CastSpell(me, SPELL_AURA_OF_REGENERATION, false);
-                    restoreTimer = 1;
-                }
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (restoreTimer)
-            {
-                restoreTimer += diff;
-                if (restoreTimer >= 90 * IN_MILLISECONDS)
-                {
-                    Talk(0);
-                    me->SetRegeneratingHealth(true);
-                    restoreTimer = 0;
-                    me->SetReactState(REACT_AGGRESSIVE);
-                    me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                    me->RemoveUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-                }
-                return;
-            }
-
-            if (!UpdateVictim())
-                return;
-
-            abilityTimer1 += diff;
-            abilityTimer2 += diff;
-
-            if (abilityTimer1 >= 5000)
-            {
-                me->CastSpell(me->GetVictim(), SPELL_ENSNARE, false);
-                abilityTimer1 = 0;
-            }
-
-            if (abilityTimer2 >= 30000)
-            {
-                me->CastSpell(me->GetVictim(), SPELL_CRYSTAL_BLOOM, false);
-                abilityTimer2 = 0;
-            }
-        }
-    };
+    }
 };
 
 void AddSC_instance_nexus()
 {
     new instance_nexus();
-    new npc_crystalline_frayer();
+    RegisterNexusCreatureAI(npc_crystalline_frayer);
 }
-

@@ -528,7 +528,7 @@ struct npc_pet_gen_imp_in_a_bottle : public NullCreatureAI
 
         if (TempSummon* summon = me->ToTempSummon())
             if (Unit* owner = summon->GetSummonerUnit())
-                if (owner->GetTypeId() == TYPEID_PLAYER)
+                if (owner->IsPlayer())
                 {
                     _ownerGUID = owner->GetGUID();
                     if (owner->ToPlayer()->GetGroup())
@@ -597,7 +597,7 @@ struct npc_pet_gen_wind_rider_cub : public NullCreatureAI
             checkTimer2 = 0;
             if (Unit* owner = me->GetOwner())
             {
-                if (owner->HasAuraType(SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED) || owner->HasAuraType(SPELL_AURA_MOD_INCREASE_MOUNTED_SPEED))
+                if (owner->HasIncreaseMountedFlightSpeedAura() || owner->HasIncreaseMountedSpeedAura())
                 {
                     isFlying = true;
                     me->SetCanFly(true);
@@ -837,4 +837,3 @@ void AddSC_generic_pet_scripts()
     RegisterCreatureAI(npc_pet_gen_moth);
     RegisterCreatureAI(npc_pet_darting_hatchling);
 }
-

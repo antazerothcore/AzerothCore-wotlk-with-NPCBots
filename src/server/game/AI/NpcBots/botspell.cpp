@@ -1,3 +1,4 @@
+#include "botdefine.h"
 #include "botspell.h"
 #include "DBCStores.h"
 #include "Log.h"
@@ -892,7 +893,7 @@ void GenerateBotCustomSpells()
     //sinfo->Effects[0].ApplyAuraName = SPELL_AURA_PERIODIC_DAMAGE;
     sinfo->Effects[0].BasePoints = 100;
     //sinfo->Effects[0].DieSides = 0;
-    sinfo->Effects[0].BonusMultiplier = 2.f;
+    sinfo->Effects[0].BonusMultiplier = 1.5f;
     sinfo->Effects[0].DamageMultiplier = 1.f;
     sinfo->Effects[0].RealPointsPerLevel = 10.f;
     //sinfo->Effects[0].ValueMultiplier = 1.f;
@@ -927,7 +928,7 @@ void GenerateBotCustomSpells()
     sinfo->ExplicitTargetMask = TARGET_FLAG_UNIT;
     sinfo->Attributes |= SPELL_ATTR0_NO_ACTIVE_DEFENSE;
     sinfo->AttributesEx |= SPELL_ATTR1_NO_REDIRECTION | SPELL_ATTR1_NO_REFLECTION;
-    sinfo->AttributesEx3 |= SPELL_ATTR3_SUPRESS_TARGET_PROCS | SPELL_ATTR3_ALWAYS_HIT;
+    sinfo->AttributesEx3 |= SPELL_ATTR3_SUPPRESS_TARGET_PROCS | SPELL_ATTR3_ALWAYS_HIT;
     sinfo->AttributesEx4 |= SPELL_ATTR4_NO_CAST_LOG;
     sinfo->AttributesEx5 |= SPELL_ATTR5_EXTRA_INITIAL_PERIOD;
 
@@ -1527,7 +1528,8 @@ void GenerateBotCustomSpells()
     sinfo->PowerType = POWER_MANA;
     sinfo->ManaCost = 100 * 5;
     sinfo->MaxAffectedTargets = 0;
-    sinfo->ChannelInterruptFlags = 0x100C;
+    sinfo->InterruptFlags = 0x1;
+    sinfo->ChannelInterruptFlags = 0x0;
     sinfo->CastTimeEntry = sSpellCastTimesStore.LookupEntry(1); //0
     sinfo->RangeEntry = sSpellRangeStore.LookupEntry(5); //40 yds
     sinfo->DurationEntry = sSpellDurationStore.LookupEntry(592); //400ms
@@ -1535,7 +1537,7 @@ void GenerateBotCustomSpells()
     sinfo->Attributes |= SPELL_ATTR0_DO_NOT_DISPLAY | SPELL_ATTR0_IS_ABILITY;
     sinfo->AttributesEx |= SPELL_ATTR1_IS_SELF_CHANNELED | SPELL_ATTR1_TRACK_TARGET_IN_CHANNEL | SPELL_ATTR1_NO_THREAT;
     sinfo->AttributesEx2 |= SPELL_ATTR2_IGNORE_LINE_OF_SIGHT;
-    sinfo->AttributesEx3 |= SPELL_ATTR3_SUPRESS_TARGET_PROCS;
+    sinfo->AttributesEx3 |= SPELL_ATTR3_SUPPRESS_TARGET_PROCS;
 
     sinfo->Effects[0].Effect = SPELL_EFFECT_APPLY_AURA;
     sinfo->Effects[0].ApplyAuraName = SPELL_AURA_DUMMY;
@@ -1666,7 +1668,7 @@ void GenerateBotCustomSpells()
     sinfo->Attributes |= SPELL_ATTR0_IS_ABILITY | SPELL_ATTR0_DO_NOT_SHEATH | SPELL_ATTR0_ALLOW_CAST_WHILE_DEAD | SPELL_ATTR0_ALLOW_WHILE_SITTING;
     sinfo->AttributesEx |= SPELL_ATTR1_NO_REFLECTION | SPELL_ATTR1_NO_REDIRECTION | SPELL_ATTR1_NO_THREAT;
     sinfo->AttributesEx2 |= SPELL_ATTR2_IGNORE_LINE_OF_SIGHT;
-    sinfo->AttributesEx3 |= SPELL_ATTR3_ALWAYS_HIT | SPELL_ATTR3_SUPRESS_TARGET_PROCS;
+    sinfo->AttributesEx3 |= SPELL_ATTR3_ALWAYS_HIT | SPELL_ATTR3_SUPPRESS_TARGET_PROCS;
     sinfo->AttributesEx5 |= SPELL_ATTR5_ALLOW_WHILE_STUNNED;
     sinfo->AttributesEx6 |= SPELL_ATTR6_ALLOW_WHILE_RIDING_VEHICLE | SPELL_ATTR6_IGNORE_PHASE_SHIFT;
 
@@ -1713,7 +1715,8 @@ void GenerateBotCustomSpells()
     sinfo->PowerType = POWER_MANA;
     sinfo->ManaCost = 50 * 5;
     sinfo->MaxAffectedTargets = 1;
-    //sinfo->ChannelInterruptFlags = 0; // 0x100C
+    sinfo->InterruptFlags = 0x1;
+    sinfo->ChannelInterruptFlags = 0x100C;
     sinfo->RangeEntry = sSpellRangeStore.LookupEntry(4); //30 yds
     sinfo->DurationEntry = sSpellDurationStore.LookupEntry(327); //500ms // (36); // 1000ms // (327); //500ms
     sinfo->ExplicitTargetMask = TARGET_FLAG_CORPSE_ENEMY;
@@ -1751,6 +1754,7 @@ void GenerateBotCustomSpells()
     sinfo->ManaCost = 50 * 5;
     sinfo->MaxAffectedTargets = 0;
     sinfo->StackAmount = 0;
+    sinfo->InterruptFlags = 0x1;
     sinfo->ChannelInterruptFlags = 0x100C;
     sinfo->CastTimeEntry = sSpellCastTimesStore.LookupEntry(1); //0
     sinfo->RangeEntry = sSpellRangeStore.LookupEntry(4); //30 yds
@@ -1758,7 +1762,7 @@ void GenerateBotCustomSpells()
     sinfo->ExplicitTargetMask = TARGET_FLAG_UNIT;
     sinfo->Attributes |= SPELL_ATTR0_DO_NOT_DISPLAY | SPELL_ATTR0_DO_NOT_LOG;
     sinfo->AttributesEx |= SPELL_ATTR1_IS_SELF_CHANNELED | SPELL_ATTR1_NO_AURA_ICON | SPELL_ATTR1_NO_THREAT;
-    sinfo->AttributesEx3 |= SPELL_ATTR3_SUPRESS_TARGET_PROCS;
+    sinfo->AttributesEx3 |= SPELL_ATTR3_SUPPRESS_TARGET_PROCS;
 
     sinfo->Effects[0].Effect = SPELL_EFFECT_APPLY_AURA;
     sinfo->Effects[0].ApplyAuraName = SPELL_AURA_DUMMY;
@@ -1885,6 +1889,12 @@ void GenerateBotCustomSpells()
     sinfo->Effects[0].DieSides = 0;
     //51) END ENERGIZE VISUAL
 
+    //XX) FIXES
+    spellId = 48155; // Mind Flay (Rank 8)
+    botSpellInfoOverrides.insert({ spellId, *sSpellMgr->GetSpellInfo(spellId) });
+    sinfo = &botSpellInfoOverrides.at(spellId);
+    sinfo->InterruptFlags &= SPELL_INTERRUPT_FLAG_MOVEMENT;
+
     for (auto& p : botSpellInfoOverrides)
     {
         for (auto& eff : p.second.Effects)
@@ -1893,7 +1903,7 @@ void GenerateBotCustomSpells()
         }
     }
 
-    LOG_INFO("server.loading", ">> Bot spellInfo overrides generated for {} spells", uint32(botSpellInfoOverrides.size()));
+    BOT_LOG_INFO("server.loading", ">> Bot spellInfo overrides generated for {} spells", uint32(botSpellInfoOverrides.size()));
 
     GenerateBotCustomSpellProcs();
 }

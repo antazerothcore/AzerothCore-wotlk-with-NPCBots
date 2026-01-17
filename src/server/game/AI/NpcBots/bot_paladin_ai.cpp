@@ -143,15 +143,6 @@ enum PaladinPassives
 
 enum PaladinSpecial
 {
-    NOAURA                              = 0,
-    DEVOTIONAURA                        = 1,
-    CONCENTRATIONAURA                   = 2,
-    FIRERESAURA                         = 3,
-    FROSTRESAURA                        = 4,
-    SHADOWRESAURA                       = 5,
-    RETRIBUTIONAURA                     = 6,
-    CRUSADERAURA                        = 7,
-
     SPECIFIC_BLESSING_WISDOM            = 0x01,
     SPECIFIC_BLESSING_KINGS             = 0x02,
     SPECIFIC_BLESSING_SANCTUARY         = 0x04,
@@ -263,6 +254,8 @@ public:
         {
             _botclass = BOT_CLASS_PALADIN;
 
+            _myaura = 0;
+
             InitUnitFlags();
         }
 
@@ -300,7 +293,7 @@ public:
                 if (tanks.empty())
                     return;
 
-                Unit* target = tanks.size() == 1 ? *tanks.begin() : Acore::Containers::SelectRandomContainerElement(tanks);
+                Unit* target = tanks.size() == 1 ? *tanks.begin() : Bcore::Containers::SelectRandomContainerElement(tanks);
                 if (doCast(target, GetSpell(BEACON_OF_LIGHT_1)))
                     return;
             }
@@ -446,7 +439,7 @@ public:
                     }
                 }
                 if (!targets.empty())
-                    target = targets.size() == 1u ? *targets.begin() : Acore::Containers::SelectRandomContainerElement(targets);
+                    target = targets.size() == 1u ? *targets.begin() : Bcore::Containers::SelectRandomContainerElement(targets);
             }
 
             if (target && doCast(target, GetSpell(SACRED_SHIELD_1)))
@@ -598,14 +591,11 @@ public:
                 return;
 
             //Glyph of Salvation
-            if (me->GetLevel() >= 26 && (IAmFree() || IsTank()))
+            if (me->GetLevel() >= 26 && me->GetVictim() && (!me->GetVictim()->CanHaveThreatList() || me->GetVictim()->IsControlledByPlayer()))
             {
                 if (!me->getAttackers().empty() && GetHealthPCT(me) < std::max<int32>(80 - 5 * me->getAttackers().size(), 25))
-                {
                     if (doCast(me, GetSpell(HAND_OF_SALVATION_1)))
-                    {}
-                }
-                return;
+                        return;
             }
 
             if (IAmFree())
@@ -636,7 +626,8 @@ public:
         {
             for (Unit* attacker : target->getAttackers())
             {
-                if (attacker->CanHaveThreatList() && attacker->getAttackers().size() >= 3 && target->GetDistance(attacker) < 15)
+                if (attacker->CanHaveThreatList() && attacker->GetThreatMgr().GetThreatListSize() >= 3 &&
+                    attacker->GetThreatMgr().GetThreat(target) > target->GetMaxHealth() / 4.f && target->GetDistance(attacker) < 15)
                 {
                     if (doCast(target, GetSpell(HAND_OF_SALVATION_1)))
                         return true;
@@ -715,7 +706,7 @@ public:
                 xphploss > _heals[HOLY_LIGHT_1])
             {
                 //Aura Mastery
-                if (hp < 60 && _aura == CONCENTRATIONAURA && IsSpellReady(AURA_MASTERY_1, diff, false) && Rand() < 90 &&
+                if (hp < 60 && _myaura == CONCENTRATION_AURA_1 && IsSpellReady(AURA_MASTERY_1, diff, false) && Rand() < 90 &&
                     ((!me->getAttackers().empty() && (*me->getAttackers().begin())->GetTypeId() == TYPEID_PLAYER) ||
                     me->GetMap()->Instanceable() || tanking))
                     if (doCast(me, GetSpell(AURA_MASTERY_1)))
@@ -894,7 +885,7 @@ public:
 
         void CheckAura(uint32 diff)
         {
-            if (checkAuraTimer > diff || GC_Timer > diff || IAmFree() || IsCasting() ||
+            if (checkAuraTimer > diff || GC_Timer > diff || (IAmFree() && !GetBG()) || IsCasting() ||
                 /*me->GetExactDist(master) > 40 || me->IsMounted() || Feasting() || */Rand() > 20)
                 return;
 
@@ -934,6 +925,11 @@ public:
                 return;
 
             //TODO: priority?
+            if (_myaura && GetSpell(_myaura) && (!idMap.contains(_myaura) || idMap[_myaura] < GetSpell(_myaura)))
+            {
+                if (doCast(me, GetSpell(_myaura)))
+                    return;
+            }
             if (DEVOTION_AURA &&
                 (!(mask & SPECIFIC_AURA_DEVOTION) || idMap[DEVOTION_AURA_1] < DEVOTION_AURA) &&
                 (!RETRIBUTION_AURA || IsTank(master) || isProt))
@@ -960,6 +956,12 @@ public:
                 (!(mask & SPECIFIC_AURA_FIRE_RES) || idMap[FIRE_RESISTANCE_AURA_1] < FIRE_RESISTANCE_AURA))
             {
                 if (doCast(me, FIRE_RESISTANCE_AURA))
+                    return;
+            }
+            if (SHADOW_RESISTANCE_AURA && GetBG() &&
+                (!(mask & SPECIFIC_AURA_SHADOW_RES) || idMap[SHADOW_RESISTANCE_AURA_1] < SHADOW_RESISTANCE_AURA))
+            {
+                if (doCast(me, SHADOW_RESISTANCE_AURA))
                     return;
             }
             if (FROST_RESISTANCE_AURA &&
@@ -1182,7 +1184,7 @@ public:
             if (players.empty())
                 return;
 
-            Unit* target = players.size() == 1 ? players.front() : Acore::Containers::SelectRandomContainerElement(players);
+            Unit* target = players.size() == 1 ? players.front() : Bcore::Containers::SelectRandomContainerElement(players);
             if (doCast(target, GetSpell(DIVINE_INTERVENTION_1)))
                 return;
         }
@@ -1210,7 +1212,8 @@ public:
             }
 
             //Holy shield
-            if (IsSpellReady(HOLY_SHIELD_1, diff) && HasRole(BOT_ROLE_DPS) && CanBlock() && !me->getAttackers().empty() &&
+            if (IsSpellReady(HOLY_SHIELD_1, diff) && HasRole(BOT_ROLE_DPS) && CanBlock() && !me->getAttackers().empty() && GetManaPCT(me) > 25 &&
+                (GetManaPCT(me) > 80 || me->getAttackers().size() > 3 || ((*me->getAttackers().cbegin())->IsCreature() && (*me->getAttackers().cbegin())->ToCreature()->isWorldBoss())) &&
                 !me->HasAuraTypeWithMiscvalue(SPELL_AURA_SCHOOL_IMMUNITY, 127))
             {
                 if (doCast(me, GetSpell(HOLY_SHIELD_1)))
@@ -1389,11 +1392,15 @@ public:
                     return;
             }
             //Consecration
-            if (IsSpellReady(CONSECRATION_1, diff) && can_do_holy && HasRole(BOT_ROLE_DPS) && dist < 5 &&
-                !mytar->isMoving() && Rand() < 50)
+            if (IsSpellReady(CONSECRATION_1, diff) && can_do_holy && HasRole(BOT_ROLE_DPS) && dist < 5 && !mytar->isMoving() && Rand() < 20)
             {
-                if (doCast(me, GetSpell(CONSECRATION_1)))
-                    return;
+                std::list<Unit*> targets;
+                GetNearbyTargetsList(targets, 8.f, 0);
+                if (targets.size() >= 2)
+                {
+                    if (doCast(me, GetSpell(CONSECRATION_1)))
+                        return;
+                }
             }
             //Hammer of the Righteous (1h only)
             if (IsSpellReady(HAMMER_OF_THE_RIGHTEOUS_1, diff) && can_do_holy && HasRole(BOT_ROLE_DPS) &&
@@ -1638,6 +1645,19 @@ public:
             }
 
             casttime = std::max<int32>(casttime - timebonus, 0);
+        }
+
+        void ApplyClassSpellNotLoseCastTimeMods(SpellInfo const* spellInfo, int32& delayReduce) const override
+        {
+            uint32 baseId = spellInfo->GetFirstRankSpell()->Id;
+            //SpellSchoolMask schools = spellInfo->GetSchoolMask();
+            uint8 lvl = me->GetLevel();
+            int32 reduceBonus = 0;
+
+            if (lvl >= 10 && (baseId == HOLY_LIGHT_1 || baseId == FLASH_OF_LIGHT_1))
+                reduceBonus += 70;
+
+            delayReduce += reduceBonus;
         }
 
         void ApplyClassSpellCooldownMods(SpellInfo const* spellInfo, uint32& cooldown) const override
@@ -2060,20 +2080,20 @@ public:
             //Aura Helper
             if (caster == me)
             {
-                if (baseId == DEVOTION_AURA_1)
-                    _aura = DEVOTIONAURA;
-                if (baseId == CONCENTRATION_AURA_1)
-                    _aura = CONCENTRATIONAURA;
-                if (baseId == FIRE_RESISTANCE_AURA_1)
-                    _aura = FIRERESAURA;
-                if (baseId == FROST_RESISTANCE_AURA_1)
-                    _aura = FROSTRESAURA;
-                if (baseId == SHADOW_RESISTANCE_AURA_1)
-                    _aura = SHADOWRESAURA;
-                if (baseId == RETRIBUTION_AURA_1)
-                    _aura = RETRIBUTIONAURA;
-                if (baseId == CRUSADER_AURA_1)
-                    _aura = CRUSADERAURA;
+                switch (baseId)
+                {
+                    case DEVOTION_AURA_1:
+                    case CONCENTRATION_AURA_1:
+                    case FIRE_RESISTANCE_AURA_1:
+                    case FROST_RESISTANCE_AURA_1:
+                    case SHADOW_RESISTANCE_AURA_1:
+                    case RETRIBUTION_AURA_1:
+                    case CRUSADER_AURA_1:
+                        SetAIMiscValue(BOTAI_MISC_AURA_TYPE, baseId);
+                        break;
+                    default:
+                        break;
+                }
             }
 
             //immunity markers
@@ -2150,6 +2170,31 @@ public:
             return longRange ? CalcSpellMaxRange(GetSpell(EXORCISM_1) ? EXORCISM_1 : JUDGEMENT_OF_LIGHT_1) : 10.f;
         }
 
+        uint32 GetAIMiscValue(uint32 data) const override
+        {
+            switch (data)
+            {
+                case BOTAI_MISC_AURA_TYPE:
+                    return _myaura;
+                default:
+                    return 0;
+            }
+        }
+
+        void SetAIMiscValue(uint32 data, uint32 value) override
+        {
+            switch (data)
+            {
+                case BOTAI_MISC_AURA_TYPE:
+                    _myaura = value;
+                    break;
+                default:
+                    break;
+            }
+
+            bot_ai::SetAIMiscValue(data, value);
+        }
+
         void Reset() override
         {
             checkAuraTimer = 0;
@@ -2158,7 +2203,6 @@ public:
             checkBeaconTimer = 0;
             avDelayTimer = 0;
             shieldDelayTimer = 0;
-            _aura = NOAURA;
             _sacDamage = 0;
 
             CLEANSE = 0;
@@ -2349,19 +2393,13 @@ public:
                 case HOLY_SHOCK_1:
                     return HasRole(BOT_ROLE_HEAL);
                 case DEVOTION_AURA_1:
-                    return _aura != DEVOTIONAURA;
                 case CONCENTRATION_AURA_1:
-                    return _aura != CONCENTRATIONAURA;
                 case FIRE_RESISTANCE_AURA_1:
-                    return _aura != FIRERESAURA;
                 case FROST_RESISTANCE_AURA_1:
-                    return _aura != FROSTRESAURA;
                 case SHADOW_RESISTANCE_AURA_1:
-                    return _aura != SHADOWRESAURA;
                 case RETRIBUTION_AURA_1:
-                    return _aura != RETRIBUTIONAURA;
                 case CRUSADER_AURA_1:
-                    return _aura != CRUSADERAURA;
+                    return _myaura != basespell;
                 case PURIFY_1:
                     return !GetSpell(CLEANSE_1);
                 default:
@@ -2373,16 +2411,16 @@ public:
         void FillAbilitiesSpecifics(Player const* player, std::list<std::string> &specList) override
         {
             uint32 textId;
-            switch (_aura)
+            switch (_myaura)
             {
-                case DEVOTIONAURA:      textId = BOT_TEXT_DEVOTION;         break;
-                case CONCENTRATIONAURA: textId = BOT_TEXT_CONCENTRATION;    break;
-                case FIRERESAURA:       textId = BOT_TEXT_FIRERESISTANCE;   break;
-                case FROSTRESAURA:      textId = BOT_TEXT_FROSTRESISTANCE;  break;
-                case SHADOWRESAURA:     textId = BOT_TEXT_SHADOWRESISTANCE; break;
-                case RETRIBUTIONAURA:   textId = BOT_TEXT_RETRIBUTION;      break;
-                case CRUSADERAURA:      textId = BOT_TEXT_CRUSADER;         break;
-                case NOAURA: default:   textId = BOT_TEXT_NOAURA;           break;
+                case DEVOTION_AURA_1:          textId = BOT_TEXT_DEVOTION;         break;
+                case CONCENTRATION_AURA_1:     textId = BOT_TEXT_CONCENTRATION;    break;
+                case FIRE_RESISTANCE_AURA_1:   textId = BOT_TEXT_FIRERESISTANCE;   break;
+                case FROST_RESISTANCE_AURA_1:  textId = BOT_TEXT_FROSTRESISTANCE;  break;
+                case SHADOW_RESISTANCE_AURA_1: textId = BOT_TEXT_SHADOWRESISTANCE; break;
+                case RETRIBUTION_AURA_1:       textId = BOT_TEXT_RETRIBUTION;      break;
+                case CRUSADER_AURA_1:          textId = BOT_TEXT_CRUSADER;         break;
+                default:                       textId = BOT_TEXT_NOAURA;           break;
             }
             specList.push_back(LocalizedNpcText(player, BOT_TEXT_AURA) + ": " + LocalizedNpcText(player, textId));
         }
@@ -2438,7 +2476,7 @@ public:
         //Timers
 /*misc*/uint32 checkAuraTimer, checkSealTimer, checkShieldTimer, checkBeaconTimer, avDelayTimer, shieldDelayTimer;
         //Special
-/*misc*/uint8 _aura;
+/*misc*/uint32 _myaura;
 /*misc*/int32 _sacDamage;
 
         typedef std::unordered_map<uint32 /*baseId*/, int32 /*amount*/> HealMap;

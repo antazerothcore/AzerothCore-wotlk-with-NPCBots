@@ -212,7 +212,7 @@ public:
         void KilledUnit(Unit* u) override { bot_ai::KilledUnit(u); }
         void EnterEvadeMode(EvadeReason why = EVADE_REASON_OTHER) override { bot_ai::EnterEvadeMode(why); }
         void MoveInLineOfSight(Unit* u) override { bot_ai::MoveInLineOfSight(u); }
-        void JustDied(Unit* u) override { UnsummonAll(); bot_ai::JustDied(u); }
+        void JustDied(Unit* u) override { UnsummonAll(false); bot_ai::JustDied(u); }
 
         void StartAttack(Unit* u, bool force = false)
         {
@@ -627,7 +627,7 @@ public:
                         return;
                 }
 
-                if (IsSpellReady(FROSTBOLT_1, diff) && can_do_frost && GetSpec() != BOT_SPEC_MAGE_FIRE && dist < CalcSpellMaxRange(FROSTBOLT_1))
+                if (IsSpellReady(FROSTBOLT_1, diff) && can_do_frost && (GetSpec() != BOT_SPEC_MAGE_FIRE || !can_do_fire) && dist < CalcSpellMaxRange(FROSTBOLT_1))
                 {
                     if (doCast(mytar, GetSpell(FROSTBOLT_1)))
                         return;
@@ -644,7 +644,7 @@ public:
                 if (shot->GetSpellInfo()->Id == SHOOT_WAND && shot->m_targets.GetUnitTarget() != mytar)
                     me->InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
             }
-            else if (IsSpellReady(SHOOT_WAND, diff) && me->GetDistance(mytar) < 30 && GetEquips(BOT_SLOT_RANGED) &&
+            else if (IsSpellReady(SHOOT_WAND, diff) && !me->isMoving() && me->GetDistance(mytar) < 30 && GetEquips(BOT_SLOT_RANGED) &&
                 doCast(mytar, SHOOT_WAND))
                 return;
         }
@@ -809,7 +809,7 @@ public:
 
             if (!targets.empty())
             {
-                Unit* target = targets.size() == 1u ? *targets.begin() : Acore::Containers::SelectRandomContainerElement(targets);
+                Unit* target = targets.size() == 1u ? *targets.begin() : Bcore::Containers::SelectRandomContainerElement(targets);
                 if (doCast(target, FOCUSMAGIC))
                 {
                     fmCheckTimer = 30000;
@@ -902,7 +902,7 @@ public:
 
         void CheckWard(uint32 diff)
         {
-            if ((!me->IsInCombat() && !me->HasAuraType(SPELL_AURA_PERIODIC_DAMAGE)) ||
+            if ((!me->IsInCombat() && !me->HasAuraType(SPELL_AURA_PERIODIC_DAMAGE)) || me->HasAuraType(SPELL_AURA_REFLECT_SPELLS_SCHOOL) ||
                 !IsSpellReady(FROST_WARD_1, diff) || IsCasting())
                 return;
 
@@ -1149,6 +1149,26 @@ public:
                 timebonus += casttime / 2;
 
             casttime = std::max<int32>(casttime - timebonus, 0);
+        }
+
+        void ApplyClassSpellNotLoseCastTimeMods(SpellInfo const* spellInfo, int32& delayReduce) const override
+        {
+            uint32 baseId = spellInfo->GetFirstRankSpell()->Id;
+            SpellSchoolMask schools = spellInfo->GetSchoolMask();
+            uint8 lvl = me->GetLevel();
+            int32 reduceBonus = 0;
+
+            if (AuraEffect const* vei = me->GetAuraEffect(SPELL_AURA_MOD_CASTING_SPEED_NOT_STACK, SPELLFAMILY_MAGE, 0x0, 0x4000, 0x0))
+                if (vei->IsAffectedOnSpell(spellInfo))
+                    reduceBonus += 100;
+
+            if (lvl >= 20 && (schools & SPELL_SCHOOL_MASK_FIRE))
+                reduceBonus += 70;
+
+            if (GetSpec() == BOT_SPEC_MAGE_ARCANE && lvl >= 10 && (baseId == ARCANEMISSILES_1 || baseId == ARCANE_BLAST_1))
+                reduceBonus += 100;
+
+            delayReduce += reduceBonus;
         }
 
         void ApplyClassSpellCooldownMods(SpellInfo const* spellInfo, uint32& cooldown) const override
@@ -1557,7 +1577,7 @@ public:
         void SummonBotPet()
         {
             if (botPet)
-                UnsummonAll();
+                UnsummonAll(false);
 
             uint32 entry = BOT_PET_WATER_ELEMENTAL;
 
@@ -1578,10 +1598,9 @@ public:
             botPet = myPet;
         }
 
-        void UnsummonAll() override
+        void UnsummonAll(bool savePets = true) override
         {
-            if (botPet)
-                botPet->ToTempSummon()->UnSummon();
+            UnsummonPet(savePets);
         }
 
         void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) override
@@ -1590,7 +1609,7 @@ public:
 
         void SummonedCreatureDespawn(Creature* summon) override
         {
-            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
+            //BOT_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
             if (summon == botPet)
                 botPet = nullptr;
         }
@@ -1613,7 +1632,7 @@ public:
 
         void Reset() override
         {
-            UnsummonAll();
+            UnsummonAll(false);
 
             polyCheckTimer = 0;
             fmCheckTimer = 0;
@@ -1645,7 +1664,7 @@ public:
         void InitSpells() override
         {
             uint8 lvl = me->GetLevel();
-            //bool isArca = GetSpec() == BOT_SPEC_MAGE_ARCANE;
+            bool isArca = GetSpec() == BOT_SPEC_MAGE_ARCANE;
             bool isFire = GetSpec() == BOT_SPEC_MAGE_FIRE;
             bool isFros = GetSpec() == BOT_SPEC_MAGE_FROST;
 
@@ -1687,8 +1706,8 @@ public:
             InitSpellMap(RITUAL_OF_REFRESHMENT_1); //not casted
 
   /*Talent*/lvl >= 20 ? InitSpellMap(FOCUS_MAGIC_1) : RemoveSpell(FOCUS_MAGIC_1);
-  /*Talent*/lvl >= 30 ? InitSpellMap(PRESENCE_OF_MIND_1) : RemoveSpell(PRESENCE_OF_MIND_1);
-  /*Talent*/lvl >= 40 ? InitSpellMap(ARCANE_POWER_1) : RemoveSpell(ARCANE_POWER_1);
+  /*Talent*/lvl >= 30 && (isArca || isFire) ? InitSpellMap(PRESENCE_OF_MIND_1) : RemoveSpell(PRESENCE_OF_MIND_1);
+  /*Talent*/lvl >= 40 && isArca ? InitSpellMap(ARCANE_POWER_1) : RemoveSpell(ARCANE_POWER_1);
 
   /*Talent*/lvl >= 20 ? InitSpellMap(PYROBLAST_1) : RemoveSpell(PYROBLAST_1);
   /*Talent*/lvl >= 30 && isFire ? InitSpellMap(BLAST_WAVE_1) : RemoveSpell(BLAST_WAVE_1);
