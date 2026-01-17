@@ -39,6 +39,7 @@ class bot_pet_ai : public CreatureAI
         void IsSummonedBy(WorldObject* summoner) override;
 
         Creature* GetPetsOwner() const { return petOwner; }
+        void CalculatePetsOwnerFollowPosition(Position &pos) { _calculatePos(pos); }
 
         //EventProcessor* GetEvents() { return &_petEvents; }
         uint32 GetLastDiff() const { return lastdiff; }
@@ -69,6 +70,8 @@ class bot_pet_ai : public CreatureAI
 
         //virtual uint32 GetAIMiscValue(uint32 /*data*/) const { return 0; }
         //virtual void SetAIMiscValue(uint32 /*data*/, uint32 /*value*/) {}
+
+        void OnAttackStop(Unit const* target);
 
         void OnBotPetSpellInterrupted(SpellSchoolMask schoolMask, uint32 unTimeMs);
         void OnBotPetSpellGo(Spell const* spell, bool ok = true);

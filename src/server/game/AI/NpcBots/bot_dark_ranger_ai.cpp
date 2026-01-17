@@ -129,7 +129,7 @@ public:
         void JustEngagedWith(Unit* u) override { bot_ai::JustEngagedWith(u); }
         void EnterEvadeMode(EvadeReason why = EVADE_REASON_OTHER) override { bot_ai::EnterEvadeMode(why); }
         void MoveInLineOfSight(Unit* u) override { bot_ai::MoveInLineOfSight(u); }
-        void JustDied(Unit* u) override { UnsummonAll(); bot_ai::JustDied(u); }
+        void JustDied(Unit* u) override { UnsummonAll(false); bot_ai::JustDied(u); }
         void DoNonCombatActions(uint32 /*diff*/) { }
 
         void KilledUnit(Unit* u) override
@@ -271,7 +271,7 @@ public:
             std::list<Unit*> targets;
             GetNearbyTargetsList(targets, 50, 0);
             targets.remove_if(BOTAI_PRED::AuraedTargetExcludeByCaster(BLACK_ARROW_1, me->GetGUID()));
-            if (Unit* target = !targets.empty() ? Acore::Containers::SelectRandomContainerElement(targets) : nullptr)
+            if (Unit* target = !targets.empty() ? Bcore::Containers::SelectRandomContainerElement(targets) : nullptr)
             {
                 if (doCast(target, GetSpell(BLACK_ARROW_1)))
                     return;
@@ -437,7 +437,7 @@ public:
         {
             if (_minions.size() >= MAX_MINIONS)
             {
-                //TC_LOG_ERROR("entities.player", "bot_dranger_ai::SummonBotPet(): max minions");
+                //BOT_LOG_ERROR("entities.player", "bot_dranger_ai::SummonBotPet(): max minions");
                 Unit* u = nullptr;
                 //try 1: by minimal level
                 uint8 minlevel = me->GetLevel();
@@ -449,10 +449,10 @@ public:
                         u = *itr;
                     }
                 }
-                //try 2: by minimal duration
+                //try 2: by minimal duration (if expiring already)
                 if (!u)
                 {
-                    uint32 minduration = 0;
+                    uint32 minduration = static_cast<uint32>((*_minions.begin())->GetAI()->GetData(BOTPETAI_MISC_DURATION_MAX) * 3 / 4);
                     for (Summons::const_iterator itr = _minions.begin(); itr != _minions.end(); ++itr)
                     {
                         if ((*itr)->GetAI()->GetData(BOTPETAI_MISC_DURATION) > minduration)
@@ -462,13 +462,9 @@ public:
                         }
                     }
                 }
-                //if (u)
-                //    TC_LOG_ERROR("entities.player", "bot_dranger_ai::SummonBotPet(): found minion to erase(1)");
-                //try 3: last resort
+
                 if (!u)
-                    u = *(_minions.begin());
-                //if (u)
-                //    TC_LOG_ERROR("entities.player", "bot_dranger_ai::SummonBotPet(): found minion to erase(2)");
+                    return;
 
                 u->ToTempSummon()->UnSummon();
             }
@@ -523,19 +519,14 @@ public:
             _minions.insert(myPet);
         }
 
-        void UnsummonAll() override
+        void UnsummonAll(bool savePets = true) override
         {
-            while (!_minions.empty())
-                (*_minions.begin())->ToTempSummon()->UnSummon();
-            //for (Summons::const_iterator itr = _minions.begin(); itr != _minions.end(); ++itr)
-            //    (*itr)->ToTempSummon()->UnSummon();
-
-            //_minions.clear();
+            UnsummonCreatures(_minions, savePets);
         }
 
         void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) override
         {
-            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDies: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
+            //BOT_LOG_ERROR("entities.unit", "SummonedCreatureDies: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
             //if (summon == botPet)
             //    botPet = nullptr;
         }
@@ -543,7 +534,7 @@ public:
         void SummonedCreatureDespawn(Creature* summon) override
         {
             //all darkranger bot pets despawn at death or manually (gossip, teleport, etc.)
-            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
+            //BOT_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
             if (_minions.find(summon) != _minions.end())
                 _minions.erase(summon);
         }
@@ -566,7 +557,7 @@ public:
 
         void Reset() override
         {
-            UnsummonAll();
+            UnsummonAll(false);
 
             //for (uint8 i = 0; i != MAX_SPELL_SCHOOL; ++i)
             //    me->m_threatModifier[1] = 0.0f;
@@ -621,7 +612,7 @@ public:
         //}
     private:
         ObjectGuid _blackArrowKillGUID;
-        typedef std::set<Unit*> Summons;
+        typedef std::set<Creature*> Summons;
         Summons _minions;
     };
 };

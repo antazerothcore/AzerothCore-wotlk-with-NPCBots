@@ -8,13 +8,16 @@
 namespace NPCBots
 {
 
+template<typename ST, ST Size>
+constexpr std::array<ST, Size> index_array = ([]<typename T, T... I>(std::integer_sequence<T, I...>&&) { return std::array{ I... }; })(std::make_integer_sequence<ST, Size>{});
+
 namespace StringConvert
 {
     template<typename T>
     static std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T>, std::string>
     ToString(T t)
     {
-        return Acore::Impl::StringConvertImpl::For<T>::ToString(t);
+        return Bcore::Impl::StringConvertImpl::For<T>::ToString(t);
     }
 
     template<typename T>

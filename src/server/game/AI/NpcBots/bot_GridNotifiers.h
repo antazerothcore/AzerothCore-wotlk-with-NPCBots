@@ -111,7 +111,7 @@ class NearestHostileUnitCheck
         NearestHostileUnitCheck(NearestHostileUnitCheck const&) = delete;
         explicit NearestHostileUnitCheck(Unit const* unit, float dist, bool magic, bot_ai const* m_ai, bool targetCCed, bool withSecondary) :
         me(unit), m_range(dist), byspell(magic), ai(m_ai), AttackCCed(targetCCed), checkSecondary(withSecondary)
-        { free = ai->IAmFree(); berserk = free && (ai->IsWanderer() || unit->GetFaction() == 14); }
+        { free = ai->IAmFree(); berserk = free && (ai->IsWanderer() || unit->GetFaction() == FACTION_TEMPLATE_NEUTRAL_HOSTILE); }
         explicit NearestHostileUnitCheck(Unit const* unit, float dist, bool magic, bot_ai const* m_ai) :
         NearestHostileUnitCheck(unit, dist, magic, m_ai, true, false)
         {}
@@ -360,8 +360,9 @@ class PolyUnitCheck
                 return false;
             if (u->IsPolymorphed() ||
                 u->isFrozen() ||
-                u->isInRoots() ||
+                u->HasRootAura() ||
                 u->HasAuraType(SPELL_AURA_PERIODIC_DAMAGE) ||
+                u->HasAuraType(SPELL_AURA_MOD_PACIFY) ||
                 u->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE) ||
                 u->HasAuraTypeWithFamilyFlags(SPELL_AURA_MOD_STUN, SPELLFAMILY_PALADIN, 0x4))
                 return false;
@@ -382,7 +383,7 @@ class PolyUnitCheck
 class FearUnitCheck
 {
     public:
-        explicit FearUnitCheck(Unit const* unit, float dist = 30) : me(unit), m_range(dist) {}
+        explicit FearUnitCheck(Unit const* unit, float dist, bot_ai const* ai) : me(unit), m_range(dist), m_ai(ai) {}
         bool operator()(Unit const* u) const
         {
             if (!_botPvP && me->IsPvP() && u->IsControlledByPlayer())
@@ -395,7 +396,9 @@ class FearUnitCheck
                 return false;
             if (u->HasUnitState(UNIT_STATE_CONFUSED | UNIT_STATE_STUNNED | UNIT_STATE_FLEEING | UNIT_STATE_DISTRACTED | UNIT_STATE_CONFUSED_MOVE | UNIT_STATE_FLEEING_MOVE))
                 return false;
-            if (u->isFeared())
+            if (u->HasFearAura())
+                return false;
+            if (u->HasAuraType(SPELL_AURA_MOD_PACIFY) || u->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE))
                 return false;
             if (!me->IsWithinDistInMap(u, m_range))
                 return false;
@@ -408,7 +411,9 @@ class FearUnitCheck
                 return false;
             if (!u->isTargetableForAttack())
                 return false;
-            if (u->getAttackers().size() > 1 && u->GetVictim() != me)
+            if (u->getAttackers().size() > 2)
+                return false;
+            if (!m_ai->IsInBotParty(u->GetVictim()))
                 return false;
             //Unit::GetDiminishing() should be const but it isn't
             if (const_cast<Unit*>(u)->GetDiminishing(DIMINISHING_FEAR) > DIMINISHING_LEVEL_3)
@@ -428,6 +433,7 @@ class FearUnitCheck
     private:
         Unit const* me;
         float m_range;
+        bot_ai const* m_ai;
         FearUnitCheck(FearUnitCheck const&);
 };
 
@@ -446,6 +452,8 @@ class StunUnitCheck
             if (!u->InSamePhase(me))
                 return false;
             if (u->HasUnitState(UNIT_STATE_CONFUSED | UNIT_STATE_STUNNED | UNIT_STATE_FLEEING | UNIT_STATE_DISTRACTED | UNIT_STATE_CONFUSED_MOVE | UNIT_STATE_FLEEING_MOVE))
+                return false;
+            if (u->HasAuraType(SPELL_AURA_MOD_PACIFY) || u->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE))
                 return false;
             if (!me->IsWithinDistInMap(u, m_range))
                 return false;
@@ -532,6 +540,8 @@ class UndeadCCUnitCheck
                 return false;
             if (u->HasUnitState(UNIT_STATE_CONFUSED | UNIT_STATE_STUNNED | UNIT_STATE_FLEEING | UNIT_STATE_DISTRACTED | UNIT_STATE_CONFUSED_MOVE | UNIT_STATE_FLEEING_MOVE))
                 return false;
+            if (u->HasAuraType(SPELL_AURA_MOD_PACIFY) || u->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE))
+                return false;
             if (me->ToCreature()->GetBotClass() == BOT_CLASS_PRIEST &&
                 !(u->GetCreatureType() == CREATURE_TYPE_UNDEAD && !u->HasAuraType(SPELL_AURA_PERIODIC_DAMAGE)))
                 return false;
@@ -587,7 +597,7 @@ class RootUnitCheck
                 return false;
             if (!u->isTargetableForAttack(false))
                 return false;
-            if (u->isFrozen() || u->isInRoots())
+            if (u->isFrozen() || u->HasRootAura())
                 return false;
             if (!u->getAttackers().empty())
                 return false;
@@ -596,6 +606,7 @@ class RootUnitCheck
             if (u->GetReactionTo(me) > REP_NEUTRAL)
                 return false;
             if (u->IsPolymorphed() ||
+                u->HasAuraType(SPELL_AURA_MOD_PACIFY) ||
                 u->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE)/*hex*/ ||
                 u->HasAuraTypeWithFamilyFlags(SPELL_AURA_MOD_STUN, SPELLFAMILY_PALADIN, 0x4)/*repentance*/ ||
                 u->HasAuraTypeWithFamilyFlags(SPELL_AURA_MOD_STUN, SPELLFAMILY_PRIEST, 0x40000000)/*shackle undead*/)
@@ -991,6 +1002,8 @@ class FarTauntUnitCheck
             if (!u->InSamePhase(me))
                 return false;
             if (u->HasUnitState(UNIT_STATE_CONFUSED|UNIT_STATE_STUNNED|UNIT_STATE_FLEEING|UNIT_STATE_DISTRACTED|UNIT_STATE_CONFUSED_MOVE))
+                return false;
+            if (u->HasAuraType(SPELL_AURA_MOD_PACIFY_SILENCE))
                 return false;
             if (!u->GetVictim() || u->GetVictim() == me)
                 return false;

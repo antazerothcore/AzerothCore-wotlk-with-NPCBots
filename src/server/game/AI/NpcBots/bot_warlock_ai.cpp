@@ -226,6 +226,8 @@ public:
         {
             _botclass = BOT_CLASS_WARLOCK;
 
+            myPetType = 0;
+
             InitUnitFlags();
         }
 
@@ -240,7 +242,7 @@ public:
         void KilledUnit(Unit* u) override { bot_ai::KilledUnit(u); }
         void EnterEvadeMode(EvadeReason why = EVADE_REASON_OTHER) override { bot_ai::EnterEvadeMode(why); }
         void MoveInLineOfSight(Unit* u) override { bot_ai::MoveInLineOfSight(u); }
-        void JustDied(Unit* u) override { UnsummonAll(); bot_ai::JustDied(u); }
+        void JustDied(Unit* u) override { UnsummonAll(false); bot_ai::JustDied(u); }
         void DoNonCombatActions(uint32 diff)
         {
             if (GC_Timer > diff || me->IsMounted() || IsCasting() || Feasting() || Rand() > 20)
@@ -290,7 +292,6 @@ public:
                     return;
             }
 
-            //TODO: soulstone on self/bots
             //BUG: players cannot accept this buff if they are below lvl 20 (should be 8)
             if (hasSoulstone && soulstoneTimer <= diff && GetSpell(CREATE_SOULSTONE_1))
             {
@@ -305,7 +306,7 @@ public:
                             break;
                         for (Unit* member : all_members)
                         {
-                            if ((i >= 2 || (i == 0 ? member->IsPlayer() : member->IsNPCBot())) && me->GetMap() == member->FindMap() &&
+                            if ((i >= 2 || (i == 0 ? member->IsPlayer() : (member->IsNPCBot() && !GetBG()))) && me->GetMap() == member->FindMap() &&
                                 member->IsAlive() && !member->isPossessed() && !member->IsCharmed() &&
                                 !(member->IsNPCBot() && member->ToCreature()->IsTempBot()) &&
                                 me->GetDistance(member) < 30 && !member->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
@@ -320,13 +321,13 @@ public:
                     }
                 }
 
-                if (targets.empty() && master->IsAlive() && !master->isPossessed() && !master->IsCharmed() &&
+                if (targets.empty() && master->IsAlive() && !master->isPossessed() && !master->IsCharmed() && !(GetBG() && IsWanderer()) &&
                     me->GetDistance(master) < 30 && !master->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
                     targets.push_back(master);
 
                 if (!targets.empty())
                 {
-                    Unit* target = targets.size() == 1 ? targets.front() : Acore::Containers::SelectRandomContainerElement(targets);
+                    Unit* target = targets.size() == 1 ? targets.front() : Bcore::Containers::SelectRandomContainerElement(targets);
                     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(CREATE_SOULSTONE_1);
                     uint32 rank = spellInfo->GetRank();
 
@@ -347,7 +348,7 @@ public:
                         case 27238: spellId = SOULSTONE_RESURRECTION_6; break; //rank 6
                         case 47884: spellId = SOULSTONE_RESURRECTION_7; break; //rank 7
                         default:
-                            LOG_ERROR("entities.player", "bot_warlockAI: unknown soulstone Id {}", spellInfo->Id);
+                            BOT_LOG_ERROR("entities.player", "bot_warlockAI: unknown soulstone Id {}", spellInfo->Id);
                             spellId = SOULSTONE_RESURRECTION_1;
                             break;
                     }
@@ -608,7 +609,7 @@ public:
             //Hellfire interrupt
             Spell const* spell = me->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
             if (spell && spell->GetSpellInfo()->GetFirstRankSpell()->Id == HELLFIRE_1 &&
-                ((!IAmFree() && !master->GetBotMgr()->IsPartyInCombat()) || GetHealthPCT(me) < 25))
+                ((!IAmFree() && !master->GetBotMgr()->IsPartyInCombat(false)) || GetHealthPCT(me) < 25))
                 me->InterruptSpell(CURRENT_CHANNELED_SPELL);
             else
             {
@@ -1011,7 +1012,7 @@ public:
                 if (shot->GetSpellInfo()->Id == SHOOT_WAND && shot->m_targets.GetUnitTarget() != mytar)
                     me->InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
             }
-            else if (IsSpellReady(SHOOT_WAND, diff) && me->GetDistance(mytar) < 30 && GetEquips(BOT_SLOT_RANGED) &&
+            else if (IsSpellReady(SHOOT_WAND, diff) && !me->isMoving() && me->GetDistance(mytar) < 30 && GetEquips(BOT_SLOT_RANGED) &&
                 doCast(mytar, SHOOT_WAND))
                 return;
         }
@@ -1311,6 +1312,32 @@ public:
             casttime = std::max<int32>((float(casttime) * (1.0f - pctbonus)) - timebonus, 0);
 
             instaCast = (casttime <= 500); //triggered GCD is too long
+        }
+
+        void ApplyClassSpellNotLoseCastTimeMods(SpellInfo const* spellInfo, int32& delayReduce) const override
+        {
+            uint32 baseId = spellInfo->GetFirstRankSpell()->Id;
+            //SpellSchoolMask schools = spellInfo->GetSchoolMask();
+            uint8 lvl = me->GetLevel();
+            int32 reduceBonus = 0;
+
+            if (lvl >= 20 && (/*baseId == DRAIN_LIFE_1 || */baseId == DRAIN_MANA_1 || baseId == DRAIN_SOUL_1 || baseId == UNSTABLE_AFFLICTION_1 || baseId == HAUNT_1))
+                reduceBonus += 70;
+
+            if (GetSpec() == BOT_SPEC_WARLOCK_DESTRUCTION && lvl >= 25)
+            {
+                switch (baseId)
+                {
+                    case CHAOS_BOLT_1: case HELLFIRE_1: case IMMOLATE_1: case INCINERATE_1: case RAIN_OF_FIRE_1:
+                    case SEARING_PAIN_1: case SHADOW_BOLT_1: case SOUL_FIRE_1: case SHADOWBURN_1: case SHADOWFURY_1:
+                        reduceBonus += 70;
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            delayReduce += reduceBonus;
         }
 
         void ApplyClassSpellCooldownMods(SpellInfo const* /*spellInfo*/, uint32& cooldown) const override
@@ -1705,7 +1732,7 @@ public:
         void SummonBotPet()
         {
             if (botPet)
-                UnsummonAll();
+                UnsummonAll(false);
 
             if (myPetType == BOT_PET_INVALID) //disabled
                 return;
@@ -1787,10 +1814,9 @@ public:
             botPet = myPet;
         }
 
-        void UnsummonAll() override
+        void UnsummonAll(bool savePets = true) override
         {
-            if (botPet)
-                botPet->ToTempSummon()->UnSummon();
+            UnsummonPet(savePets);
         }
 
         void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) override
@@ -1800,7 +1826,7 @@ public:
         void SummonedCreatureDespawn(Creature* summon) override
         {
             //all warlock bot pets despawn at death or manually (gossip, teleport, etc.)
-            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
+            //BOT_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
             if (summon == botPet)
             {
                 petSummonTimer = 10000;
@@ -1856,18 +1882,18 @@ public:
                     break;
                 case BOTAI_MISC_PET_TYPE:
                     myPetType = value;
-                    UnsummonAll();
+                    UnsummonAll(false);
                     break;
                 default:
                     break;
             }
+
+            bot_ai::SetAIMiscValue(data, value);
         }
 
         void Reset() override
         {
-            UnsummonAll();
-
-            myPetType = 0;
+            UnsummonAll(false);
 
             fearTimer = 0;
             banishTimer = 0;

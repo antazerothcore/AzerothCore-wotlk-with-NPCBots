@@ -26,6 +26,7 @@
 
 //npcbot
 #include "botmgr.h"
+#include "bpet_ai.h"
 //end npcbot
 
 TempSummon::TempSummon(SummonPropertiesEntry const* properties, ObjectGuid owner, bool isWorldObject) :
@@ -222,11 +223,11 @@ void TempSummon::InitStats(uint32 duration)
         {
             SetFaction(owner->GetFaction());
             SetLevel(owner->GetLevel());
-            if (owner->GetTypeId() == TYPEID_PLAYER)
+            if (owner->IsPlayer())
                 m_ControlledByPlayer = true;
         }
 
-        if (owner->GetTypeId() == TYPEID_PLAYER)
+        if (owner->IsPlayer())
             m_CreatedByPlayer = true;
     }
 
@@ -264,14 +265,14 @@ void TempSummon::InitSummon()
     WorldObject* owner = GetSummoner();
     if (owner)
     {
-        if (owner->GetTypeId() == TYPEID_UNIT)
+        if (owner->IsCreature())
         {
             if (owner->ToCreature()->IsAIEnabled)
             {
                 owner->ToCreature()->AI()->JustSummoned(this);
             }
         }
-        else if (owner->GetTypeId() == TYPEID_GAMEOBJECT)
+        else if (owner->IsGameObject())
         {
             if (owner->ToGameObject()->AI())
             {
@@ -282,6 +283,11 @@ void TempSummon::InitSummon()
         if (IsAIEnabled)
             AI()->IsSummonedBy(owner);
     }
+}
+
+void TempSummon::UpdateObjectVisibilityOnCreate()
+{
+    WorldObject::UpdateObjectVisibility(true);
 }
 
 void TempSummon::SetTempSummonType(TempSummonType type)
@@ -312,13 +318,21 @@ void TempSummon::UnSummon(uint32 msTime)
         return;
     }
 
+    //npcbot
+    if (IsNPCBotPet())
+    {
+        if (Creature* petowner = GetBotPetAI()->GetPetsOwner())
+            petowner->AI()->SummonedCreatureDespawn(this);
+    }
+    else
+    //end npcbot
     if (WorldObject* owner = GetSummoner())
     {
-        if (owner->GetTypeId() == TYPEID_UNIT && owner->ToCreature()->IsAIEnabled)
+        if (owner->IsCreature() && owner->ToCreature()->IsAIEnabled)
         {
             owner->ToCreature()->AI()->SummonedCreatureDespawn(this);
         }
-        else if (owner->GetTypeId() == TYPEID_GAMEOBJECT && owner->ToGameObject()->AI())
+        else if (owner->IsGameObject() && owner->ToGameObject()->AI())
         {
             owner->ToGameObject()->AI()->SummonedCreatureDespawn(this);
         }
@@ -416,7 +430,7 @@ void Minion::setDeathState(DeathState s, bool despawn)
     Creature::setDeathState(s, despawn);
     if (s == DeathState::JustDied && IsGuardianPet())
         if (Unit* owner = GetOwner())
-            if (owner->GetTypeId() == TYPEID_PLAYER && owner->GetMinionGUID() == GetGUID())
+            if (owner->IsPlayer() && owner->GetMinionGUID() == GetGUID())
                 for (Unit::ControlSet::const_iterator itr = owner->m_Controlled.begin(); itr != owner->m_Controlled.end(); ++itr)
                     if ((*itr)->IsAlive() && (*itr)->GetEntry() == GetEntry())
                     {
@@ -438,7 +452,7 @@ std::string Minion::GetDebugInfo() const
 Guardian::Guardian(SummonPropertiesEntry const* properties, ObjectGuid owner, bool isWorldObject) : Minion(properties, owner, isWorldObject)
 {
     m_unitTypeMask |= UNIT_MASK_GUARDIAN;
-    if (properties && properties->Type == SUMMON_TYPE_PET)
+    if (properties && (properties->Type == SUMMON_TYPE_PET || properties->Category == SUMMON_CATEGORY_PET))
     {
         m_unitTypeMask |= UNIT_MASK_CONTROLABLE_GUARDIAN;
         InitCharmInfo();
@@ -453,7 +467,7 @@ void Guardian::InitStats(uint32 duration)
     {
         InitStatsForLevel(m_owner->GetLevel());
 
-        if (m_owner->GetTypeId() == TYPEID_PLAYER && HasUnitTypeMask(UNIT_MASK_CONTROLABLE_GUARDIAN))
+        if (m_owner->IsPlayer() && HasUnitTypeMask(UNIT_MASK_CONTROLABLE_GUARDIAN))
             m_charmInfo->InitCharmCreateSpells();
     }
 
@@ -466,7 +480,7 @@ void Guardian::InitSummon()
 
     if (Unit* m_owner = GetOwner())
     {
-        if (m_owner->GetTypeId() == TYPEID_PLAYER && m_owner->GetMinionGUID() == GetGUID() && !m_owner->GetCharmGUID())
+        if (m_owner->IsPlayer() && m_owner->GetMinionGUID() == GetGUID() && !m_owner->GetCharmGUID())
         {
             m_owner->ToPlayer()->CharmSpellInitialize();
         }

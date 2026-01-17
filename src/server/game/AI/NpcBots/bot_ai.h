@@ -29,6 +29,8 @@ enum WeaponAttackType : uint8;
 struct CleanDamage;
 struct CalcDamageInfo;
 struct ItemTemplate;
+struct NpcBotData;
+struct NpcBotExtras;
 struct PlayerClassLevelInfo;
 struct SpellNonMeleeDamage;
 
@@ -54,6 +56,9 @@ class bot_ai : public CreatureAI
         void InitializeAI() override;
         //void Reset() override { }
 
+        NpcBotData const* GetBotData() const { return _botData; }
+        NpcBotExtras const* GetBotExtras() const { return _botExtras; }
+
         void JustDied(Unit*) override;
         void KilledUnit(Unit* u) override;
         void AttackStart(Unit* u) override;
@@ -70,7 +75,17 @@ class bot_ai : public CreatureAI
 
         virtual void OnBotSummon(Creature* /*summon*/) {}
         virtual void OnBotDespawn(Creature* /*summon*/) {}
-        virtual void UnsummonAll() {}
+
+        virtual void UnsummonAll(bool /*savePets*/ = true) {}
+        void UnsummonCreature(Creature* creature, bool save);
+        void UnsummonPet(bool save);
+        template<typename C>
+        void UnsummonCreatures(C const& container, bool save)
+        {
+            C c2 = container; // copy; original container might get modified from within the loop
+            for (auto c : c2)
+                UnsummonCreature(c, save);
+        }
 
         virtual void OnBotDamageTaken(Unit* /*attacker*/, uint32 /*damage*/, CleanDamage const* /*cleanDamage*/, DamageEffectType /*damagetype*/, SpellInfo const* /*spellInfo*/) {}
         virtual void OnBotDamageDealt(Unit* /*victim*/, uint32 /*damage*/, CleanDamage const* /*cleanDamage*/, DamageEffectType /*damagetype*/, SpellInfo const* /*spellInfo*/) {}
@@ -140,6 +155,7 @@ class bot_ai : public CreatureAI
         void ApplyBotCritMultiplierAll(Unit const* victim, float& crit_chance, SpellInfo const* spellInfo, SpellSchoolMask schoolMask, WeaponAttackType attackType) const;
         void ApplyBotSpellCostMods(SpellInfo const* spellInfo, int32& cost) const;
         void ApplyBotSpellCastTimeMods(SpellInfo const* spellInfo, int32& casttime) const;
+        void ApplyBotSpellNotLoseCastTimeMods(SpellInfo const* spellInfo, int32& delayReduce) const;
         void ApplyBotSpellCooldownMods(SpellInfo const* spellInfo, uint32& cooldown) const;
         void ApplyBotSpellCategoryCooldownMods(SpellInfo const* spellInfo, uint32& cooldown) const;
         void ApplyBotSpellGlobalCooldownMods(SpellInfo const* spellInfo, float& cooldown) const;
@@ -168,6 +184,9 @@ class bot_ai : public CreatureAI
         //wandering bots
         bool IsWanderer() const { return _wanderer; }
         void SetWanderer();
+        static bool IsWanderNodeAvailableForBotFaction(WanderNode const* wp, uint32 factionTemplateId, bool teleport);
+        WanderNode const* GetClosestWanderNode() const;
+        WanderNode const* GetNextWanderNode(Position const* fromPos, uint8 lvl, bool random) const;
         WanderNode const* GetNextTravelNode(Position const* from, bool random) const;
         WanderNode const* GetNextBGTravelNode() const;
         void OnWanderNodeReached();
@@ -249,8 +268,10 @@ class bot_ai : public CreatureAI
         bool CanChangeEquip(uint8 slot) const;
         virtual bool CanSeeEveryone() const { return false; }
         virtual float GetBotArmorPenetrationCoef() const { return armor_pen; }
+        void InitMiscValues();
+        void ResetAllMiscValues();
         virtual uint32 GetAIMiscValue(uint32 /*data*/) const { return 0; }
-        virtual void SetAIMiscValue(uint32 /*data*/, uint32 /*value*/) {}
+        virtual void SetAIMiscValue(uint32 data, uint32 value);
         uint8 GetBotComboPoints() const;
         float GetBotAmmoDPS() const;
 
@@ -261,8 +282,9 @@ class bot_ai : public CreatureAI
         Item* GetEquips(uint8 slot) const { return _equips[slot]; }
         Item* GetEquipsByGuid(ObjectGuid itemGuid) const;
         uint32 GetEquipDisplayId(uint8 slot) const;
-        bool UnEquipAll(ObjectGuid receiver);
-        bool HasRealEquipment() const;
+        [[nodiscard]] BotEquipResult UnEquipAll(ObjectGuid receiver, bool store_to_bank);
+        uint8 GetRealEquippedItemsCount() const;
+        bool HasRealEquipment() const { return !!GetRealEquippedItemsCount(); }
         float GetAverageItemLevel() const;
         std::pair<float, float> GetBotGearScores() const;
 
@@ -274,6 +296,7 @@ class bot_ai : public CreatureAI
         void OnBotOwnerSpellGo(Spell const* spell, bool ok = true);
         void OnBotChannelFinish(Spell const* spell);
         void OnOwnerVehicleDamagedBy(Unit* attacker);
+        void OnAttackStop(Unit const* target);
         virtual void OnClassSpellStart(SpellInfo const* /*spellInfo*/) {}
         virtual void OnClassSpellGo(SpellInfo const* /*spell*/) {}
         virtual void OnClassChannelFinish(Spell const* /*spell*/) {}
@@ -475,6 +498,7 @@ class bot_ai : public CreatureAI
         virtual void ApplyClassSpellCritMultiplierAll(Unit const* /*victim*/, float& /*crit_chance*/, SpellInfo const* /*spellInfo*/, SpellSchoolMask /*schoolMask*/, WeaponAttackType /*attackType*/) const {}
         virtual void ApplyClassSpellCostMods(SpellInfo const* /*spellInfo*/, int32& /*cost*/) const {}
         virtual void ApplyClassSpellCastTimeMods(SpellInfo const* /*spellInfo*/, int32& /*casttime*/) const {}
+        virtual void ApplyClassSpellNotLoseCastTimeMods(SpellInfo const* /*spellInfo*/, int32& /*delayReduce*/) const {}
         virtual void ApplyClassSpellCooldownMods(SpellInfo const* /*spellInfo*/, uint32& /*cooldown*/) const {}
         virtual void ApplyClassSpellCategoryCooldownMods(SpellInfo const* /*spellInfo*/, uint32& /*cooldown*/) const {}
         virtual void ApplyClassSpellGlobalCooldownMods(SpellInfo const* /*spellInfo*/, float& /*cooldown*/) const {}
@@ -519,7 +543,8 @@ class bot_ai : public CreatureAI
 
         void ReportSpellCast(uint32 spellId, const std::string& followedByString, Player const* target) const;
 
-        void ApplyItemBonuses(uint8 slot);
+        void ApplyItemEnchantment(Item* item, EnchantmentSlot eslot, uint8 slot);
+        void RemoveItemClassEnchantment(uint8 slot);
 
         bool HasAuraTypeWithValueAtLeast(AuraType auratype, int32 minvalue, Unit const* unit = nullptr) const;
 
@@ -579,9 +604,9 @@ class bot_ai : public CreatureAI
         void RemoveItemBonuses(uint8 slot);
         void RemoveItemEnchantments(Item const* item);
         void RemoveItemEnchantment(Item const* item, EnchantmentSlot eslot);
-        void RemoveItemClassEnchants();
+        void RemoveItemClassEnchantments();
+        void ApplyItemBonuses(uint8 slot);
         void ApplyItemEnchantments(Item* item, uint8 slot);
-        void ApplyItemEnchantment(Item* item, EnchantmentSlot eslot, uint8 slot);
         void ApplyItemEquipSpells(Item* item, bool apply);
         void ApplyItemEquipEnchantmentSpells(Item* item);
         void ApplyItemSetBonuses(Item* item, bool apply);
@@ -621,14 +646,15 @@ class bot_ai : public CreatureAI
         void _autoLootCreatureItems(Player* receiver, Creature* creature, uint32 lootQualityMask, uint32 lootThreshold) const;
         void _autoLootCreature(Creature* creature);
 
-        bool _canUseOffHand() const;
+        bool _canUseOffHand(ItemTemplate const* with = nullptr, bool ignore_mh = false) const;
         bool _canUseRanged() const;
         bool _canUseRelic() const;
-        bool _canEquip(ItemTemplate const* newProto, uint8 slot, bool ignoreItemLevel, Item const* newItem = nullptr) const;
+        bool _canCombineWeapons(ItemTemplate const* mh, ItemTemplate const* oh) const;
+        bool _canEquip(ItemTemplate const* newProto, uint8 slot, bool ignoreItemLevel, Item const* newItem = nullptr, bool ignore_combine = false) const;
         void _removeEquipment(uint8 slot);
-        bool _unequip(uint8 slot, ObjectGuid receiver);
-        bool _equip(uint8 slot, Item* newItem, ObjectGuid receiver);
-        bool _resetEquipment(uint8 slot, ObjectGuid receiver);
+        [[nodiscard]] BotEquipResult _unequip(uint8 slot, ObjectGuid receiver, bool store_to_bank, bool on_equip_from_bank = false);
+        [[nodiscard]] BotEquipResult _equip(uint8 slot, Item* newItem, ObjectGuid receiver, bool store_to_bank, bool from_bank = false);
+        [[nodiscard]] BotEquipResult _resetEquipment(uint8 slot, ObjectGuid receiver, bool store_to_bank);
 
         void _castBotItemUseSpell(Item const* item, SpellCastTargets const& targets/*, uint8 cast_count = 0, uint32 glyphIndex = 0*/);
 
@@ -666,6 +692,9 @@ class bot_ai : public CreatureAI
 
         void _saveStats();
 
+        NpcBotData* const _botData;
+        NpcBotExtras* const _botExtras;
+
         PlayerClassLevelInfo* _classinfo;
         SpellInfo const* m_botSpellInfo;
         Position homepos, movepos, attackpos, sendlastpos;
@@ -682,9 +711,10 @@ class bot_ai : public CreatureAI
 
         //timers
         uint32 _reviveTimer, _powersTimer, _chaseTimer, _engageTimer, _potionTimer;
-        uint32 lastdiff, checkAurasTimer, checkMasterTimer, roleTimer, ordersTimer, regenTimer, _updateTimerMedium, _updateTimerEx1, _updateTimerEx2;
+        uint32 lastdiff, checkAurasTimer, checkMasterTimer, roleTimer, ordersTimer, regenTimer, _updateTimerLong, _updateTimerMedium, _updateTimerEx1, _updateTimerEx2;
         uint32 _checkOwershipTimer;
         uint32 _moveBehindTimer;
+        uint32 _rentTimer;
         uint32 _wmoAreaUpdateTimer;
         uint32 waitTimer;
         uint32 itemsAutouseTimer;
@@ -695,6 +725,7 @@ class bot_ai : public CreatureAI
         uint32 _groupUpdateTimer;
         //save timers
         uint32 _saveDisabledSpellsTimer;
+        uint32 _saveMiscValuesTimer;
 
         uint32 _lastZoneId, _lastAreaId, _lastWMOAreaId;
         uint32 _selfrez_spell_id;
@@ -736,6 +767,7 @@ class bot_ai : public CreatureAI
 
         //save flags
         bool _saveDisabledSpells;
+        bool _saveMiscValues;
 
         TeleportHomeEvent* teleHomeEvent;
         TeleportFinishEvent* teleFinishEvent;
@@ -778,9 +810,14 @@ class bot_ai : public CreatureAI
                     uint32 baseSpell;
                 } spellCastParams;
 
+                struct
+                {
+                    uint64 targetGuid;
+                } pullParams;
+
             } params;
 
-            explicit BotOrder(BotOrderTypes order_type) : _type(order_type)
+            explicit BotOrder(BotOrderTypes order_type, uint32 timeout_sec = 10) : _type(order_type), _timeout(time(0) + timeout_sec)
             {
                 memset((char*)(&params), 0, sizeof(params));
             }
@@ -792,10 +829,11 @@ class bot_ai : public CreatureAI
 
         private:
             BotOrderTypes _type;
+            time_t _timeout;
         };
 
         bool HasOrders() const { return !_orders.empty(); }
-        bool IsLastOrder(BotOrderTypes order_type, uint32 param1) const;
+        bool IsLastOrder(BotOrderTypes order_type, uint32 param1 = 0, ObjectGuid guidparam1 = ObjectGuid::Empty) const;
         std::size_t GetOrdersCount() const { return _orders.size(); }
         bool AddOrder(BotOrder&& order);
         void CancelOrder(BotOrder const& order);
